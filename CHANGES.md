@@ -1,0 +1,272 @@
+# TransOmni - Changes from TransDoDNet
+
+This document details all changes made to adapt the 3D TransDoDNet codebase for 2D histopathology image segmentation with the Omni-Seg dataset.
+
+## Overview
+
+**TransOmni** is a 2D adaptation of TransDoDNet (Transformer-based Dynamic on-Demand Network) for multi-tissue segmentation of histopathology images from the Omni-Seg dataset.
+
+| Aspect | TransDoDNet (Original) | TransOmni (Adapted) |
+|--------|------------------------|---------------------|
+| Data Type | 3D CT volumes (NIfTI) | 2D histopathology images (PNG) |
+| Input Channels | 1 (grayscale) | 3 (RGB) |
+| Input Shape | [B, 1, D, H, W] | [B, 3, H, W] |
+| Tasks | 7 organs | 6 tissue types |
+| Augmentation | batchgenerators | imgaug |
+
+---
+
+## File-by-File Changes
+
+### 1. MOTSDataset.py
+
+**Purpose:** Data loading and augmentation
+
+| Changed | From (3D) | To (2D) |
+|---------|-----------|---------|
+| File format | NIfTI (.nii) via nibabel | PNG via matplotlib/PIL |
+| Augmentation library | batchgenerators | imgaug |
+| Input dimensions | [B, 1, D, H, W] | [B, 3, H, W] |
+| Normalization | HU clipping [-325, 325] | Float [0, 1] |
+| Cropping | 3D bounding box | 2D resize |
+
+**New Features:**
+- Edge weight calculation for loss weighting
+- Folder-based data organization parsing
+- imgaug augmentation pipeline:
+  - Affine (translate, rotate, shear, scale)
+  - Color (gamma, brightness)
+  - Noise (dropout, blur, Gaussian noise)
+
+---
+
+### 2. models/ResCNN2.py
+
+**Purpose:** ResNet backbone for feature extraction
+
+| Changed | From (3D) | To (2D) |
+|---------|-----------|---------|
+| `nn.Conv3d` | ✓ | `nn.Conv2d` |
+| `nn.ConvTranspose3d` | ✓ | `nn.ConvTranspose2d` |
+| `nn.BatchNorm3d` | ✓ | `nn.BatchNorm2d` |
+| `nn.InstanceNorm3d` | ✓ | `nn.InstanceNorm2d` |
+| `nn.MaxPool3d` | ✓ | `nn.MaxPool2d` |
+| `F.avg_pool3d` | ✓ | `F.avg_pool2d` |
+| `in_channels` | 1 | 3 |
+| Kernel sizes | (3,3,3) | (3,3) |
+| Strides | (2,2,2) | (2,2) |
+
+---
+
+### 3. models/TransDoDNet.py
+
+**Purpose:** Main model architecture
+
+| Changed | From (3D) | To (2D) |
+|---------|-----------|---------|
+| All Conv3d | ✓ | Conv2d |
+| All ConvTranspose3d | ✓ | ConvTranspose2d |
+| `nn.Upsample` mode | trilinear | bilinear |
+| `scale_factor` | (1, 2, 2) | 2 |
+| `_expand` function | 5D | 4D |
+| Dynamic head `F.conv3d` | ✓ | `F.conv2d` |
+| Weight reshape | (-1, 1, 1, 1, 1) | (-1, 1, 1, 1) |
+| Output shape | [B, Q, C, D, H, W] | [B, Q, C, H, W] |
+
+---
+
+### 4. models/deformable_transformer.py
+
+**Purpose:** Deformable transformer encoder-decoder
+
+| Changed | From (3D) | To (2D) |
+|---------|-----------|---------|
+| `get_reference_points` | Meshgrid (D,H,W) | Meshgrid (H,W) |
+| Spatial shapes | (D, H, W) per level | (H, W) per level |
+| Reference points | 3 coordinates | 2 coordinates |
+| Valid ratios | 3D | 2D |
+
+---
+
+### 5. models/ops/modules/ms_deform_attn.py
+
+**Purpose:** Multi-scale deformable attention
+
+| Changed | From (3D) | To (2D) |
+|---------|-----------|---------|
+| Core attention | `ms_deform_attn_core_pytorch_3D` | `ms_deform_attn_core_pytorch_2D` |
+| `F.grid_sample` | 3D volume | 2D image |
+| Sampling locations | 3 coordinates | 2 coordinates |
+| Value reshape | 5D | 4D |
+
+**Implementation:** Pure PyTorch (no CUDA kernels required)
+
+---
+
+### 6. models/position_encoding.py
+
+**Purpose:** Positional embeddings for transformer
+
+| Changed | From (3D) | To (2D) |
+|---------|-----------|---------|
+| Position dims | (D, H, W) | (H, W) |
+| Sinusoidal encoding | pos_d, pos_y, pos_x | pos_y, pos_x |
+| Output channels | 3 * num_pos_feats | 2 * num_pos_feats |
+
+---
+
+### 7. loss_functions/loss.py
+
+**Purpose:** Training losses
+
+| Feature | Status |
+|---------|--------|
+| DiceLoss4MOTS | Adapted for 2D tensors |
+| CELoss4MOTS | Added edge weight support |
+| CombinedLoss | New combined loss class |
+
+---
+
+### 8. train.py
+
+**Purpose:** Training script
+
+| Changed | From | To |
+|---------|------|-----|
+| Input size format | "D,H,W" | "H,W" |
+| Data prefetcher | 3D tensors | 2D tensors |
+| Default num_queries | 7 | 6 |
+| Output shape | 6D | 5D |
+| Edge weight loss | Not used | Supported |
+
+---
+
+### 9. test.py
+
+**Purpose:** Testing/inference script
+
+| Feature | Status |
+|---------|--------|
+| Dice score evaluation | ✓ |
+| IoU score evaluation | ✓ |
+| Per-tissue metrics | ✓ |
+| Prediction saving | ✓ |
+
+---
+
+## Configuration Defaults
+
+### Omni-Seg Tissue Types (num_queries=6)
+
+| ID | Tissue | Description |
+|----|--------|-------------|
+| 0 | TUFT | Glomerular Tuft |
+| 1 | CAP | Glomerular Capillary |
+| 2 | PT | Proximal Tubule |
+| 3 | DT | Distal Tubule |
+| 4 | PTC | Peritubular Capillary |
+| 5 | VES | Vessel |
+
+### Default Arguments
+
+```bash
+--input_size 256,256
+--batch_size 4
+--num_queries 6
+--num_classes 2
+--hidden_dim 192
+--enc_layers 3
+--dec_layers 3
+--num_feature_levels 3
+--res_depth 50
+```
+
+---
+
+## Features Retained from TransDoDNet
+
+1. **Dynamic Heads** - Task-specific segmentation heads generated by transformer
+2. **Deformable Attention** - Efficient multi-scale attention mechanism
+3. **DeepNorm** - Training stabilization for deep transformers
+4. **Multi-scale Features** - Feature pyramid with 3 levels
+5. **Skip Connections** - U-Net style encoder-decoder connections
+6. **Mixed Precision** - Optional FP16 training with APEX
+
+---
+
+## Features Added from Omni-Seg
+
+1. **imgaug Augmentations** - Rich geometric and photometric augmentations
+2. **Edge Weighting** - Morphological dilation for edge emphasis in loss
+3. **Folder-based Data Loading** - Automatic parsing of Omni-Seg folder structure
+4. **RGB Support** - 3-channel input for histopathology images
+
+---
+
+## Usage
+
+### Training
+
+```bash
+cd TransOmni
+python train.py \
+    --data_dir /path/to/omniseg/train \
+    --input_size 256,256 \
+    --batch_size 4 \
+    --num_epochs 500 \
+    --num_queries 6 \
+    --snapshot_dir snapshots/
+```
+
+### Testing
+
+```bash
+python test.py \
+    --data_dir /path/to/omniseg/val \
+    --restore_from snapshots/checkpoint.pth \
+    --output_dir predictions/
+```
+
+---
+
+## Dependencies
+
+```
+torch>=1.10.0
+numpy
+matplotlib
+imgaug
+scipy
+scikit-image
+PIL
+tqdm
+```
+
+Optional:
+- `apex` for mixed precision training
+
+---
+
+## Code Structure Comparison
+
+```
+TransDoD/                       TransOmni/
+├── MOTSDataset.py         →   ├── MOTSDataset.py (2D)
+├── train.py               →   ├── train.py (2D)
+├── test.py                →   ├── test.py (2D)
+├── engine.py              →   ├── engine.py
+├── loss_functions/        →   ├── loss_functions/
+│   └── loss.py           →   │   └── loss.py (2D)
+├── utils/                 →   ├── utils/
+│   ├── my_utils.py       →   │   ├── my_utils.py
+│   └── ParaFlop.py       →   │   └── ParaFlop.py
+└── models/                →   └── models/
+    ├── ResCNN2.py        →       ├── ResCNN2.py (2D)
+    ├── TransDoDNet.py    →       ├── TransDoDNet.py (2D)
+    ├── deformable_transformer.py → ├── deformable_transformer.py (2D)
+    ├── position_encoding.py →    ├── position_encoding.py (2D)
+    ├── deepnorm.py       →       ├── deepnorm.py
+    └── ops/              →       └── ops/
+        └── modules/      →           └── modules/
+            └── ms_deform_attn.py →       └── ms_deform_attn.py (2D)
+```
