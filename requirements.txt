@@ -1,0 +1,30 @@
+# TransOmni Requirements
+# For histopathology segmentation with deformable transformers
+
+# Core PyTorch (install via conda for CUDA support)
+# conda install pytorch torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
+torch>=1.10.0
+torchvision>=0.11.0
+
+# Image processing
+numpy>=1.21.0
+matplotlib>=3.4.0
+scipy>=1.7.0
+Pillow>=8.0.0
+
+# Augmentation (critical for training)
+imgaug>=0.4.0
+
+# Data handling
+pandas>=1.3.0
+
+# Progress bar and logging
+tqdm>=4.62.0
+tensorboardX>=2.4
+
+# Optional: Mixed precision training
+# pip install nvidia-apex (or build from source)
+# apex
+
+# Optional: For model analysis
+# thop>=0.0.31  # For FLOPs counting
